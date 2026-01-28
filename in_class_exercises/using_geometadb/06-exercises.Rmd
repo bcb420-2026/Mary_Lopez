@@ -16,4 +16,169 @@ In this exercise, you'll retrieve metadata for the following GEO Series and answ
 
 > Hint: Sample labels are not standardized. Use robust keyword detection (e.g., `control|normal|healthy|wild[- ]?type` vs. `tumou?r|cancer|patient|disease|mutant|treated`). Inspect a few GSM rows if the automatic inference is uncertain.
 
+## ANSWERS
+
+
+**GSE201427** 
+
+
+1. RNA seq Illumina HiSeq 4000 (Homo sapiens) high-throughput sequencing
+
+1. Human Panc1 cells,
+   SF3B1 (siSF3B1) expression was measured
+
+1. 8 samples 
+1. 5 control \
+   3 siRNA targeting SF3B1
+
+
+**GSE166530**
+
+1. RNA seqIllumina NovaSeq 6000 (Homo sapiens) high-throughput sequencing
+
+1. host transcriptional response to SARS-CoV-2 infection
+
+1. 41 samples 
+1. 5 negative samples \ and 36 covid positive samples 
+
+**GSE162183**
+
+1. Illumina NovaSeq 6000 (Homo sapiens)
+Single cell RNA-seq study of 
+1. human psoriasis skin
+1. 6 samples
+1. 3control \ 3 psoriasis 
+
+**GSE186458**
+
+1. Illumina NovaSeq 6000 (Homo sapiens)
+ Methylation profiling by high throughput sequencing
+
+1. atlas of cell type-specific methylation
+ 
+1. 253 different samples
+
+1. 44 unique samples
+
+
+**Q5**
+**GEO dataset - GSE264108** has a very high ascension number so is very new and the snapshot has not been recently updated so it returns no data as the geo series GSE264108 is not in my GEOmetadb.sqlite.
+
+## code
+first we will show the query for GSE264108 returns nothing. 
+```{r}
+dbGetQuery(con,
+  "SELECT gse, title, submission_date
+   FROM gse
+   WHERE gse = 'GSE264108'"
+)
+
+# you can check the snapshot date of your GEOmetadb file: 
+#dbGetQuery(con, "SELECT * FROM meta")
+
+```
+
+Here is how I searched these geo series and retreived the meta data:
+I first did a general query this returned enough information through the summary and type for me to answer the first two questions: what kind of data is it and what experimental model it is using.
+next I queried the samples which was enough to answer number of samples for each geoseries.
+
+```{r}
+gse_ids <- c("GSE201427","GSE166530","GSE162183","GSE186458")
+
+gse_ids_sql <- paste(sprintf("'%s'", gse_ids), collapse = ",")
+
+
+sql_gse <- paste(
+  "SELECT gse, title, summary, overall_design, type",
+  "FROM gse",
+  "WHERE gse IN (", gse_ids_sql, ")"
+)
+
+gse_meta <- dbGetQuery(con, sql_gse)
+gse_meta
+
+sql_samples <- paste(
+  "SELECT",
+  "  gse_gsm.gse,",
+  "  gsm.gsm,",
+  "  gsm.title AS gsm_title,",
+  "  gsm.type  AS gsm_type,",
+  "  gsm.source_name_ch1,",
+  "  gsm.organism_ch1,",
+  "  gsm.characteristics_ch1",
+  "FROM gse_gsm",
+  "JOIN gsm ON gse_gsm.gsm = gsm.gsm",
+  "WHERE gse_gsm.gse IN (", gse_ids_sql, ")"
+)
+
+sample_meta <- dbGetQuery(con, sql_samples)
+#sample_meta
+
+n_samples <- sample_meta %>% count(gse, name = "n_samples")
+n_samples
+
+
+```
+Finally to answer the unique factors that the exeprimental model was comparing I had to look around each gse individually
+
+**"GSE201427"**
+```{r}
+gse201427 <- sample_meta %>%
+     filter(gse == "GSE201427")
+
+unique201427<- unique(gse201427$characteristics_ch1)
+
+gse201427 %>% 
+  count(characteristics_ch1, name = "n")
+
+```
+**"GSE166530"**
+```{r}
+gse166530 <- sample_meta %>%
+  filter(gse == "GSE166530")
+
+unique166530 <- unique(gse166530$source_name_ch1)
+
+gse166530 %>%
+  count(source_name_ch1, name = "n")
+
+```
+**"GSE162183"**
+```{r}
+gse162183 <- sample_meta %>%
+  filter(gse == "GSE162183")
+
+gse162183 %>%
+  count(gsm_title, name = "n")
+
+groups_162183 <- gse162183 %>%
+  mutate(
+    group = case_when(
+      grepl("healthy|control|normal", characteristics_ch1, ignore.case = TRUE) ~ "control",
+      grepl("psoriasis|covid|infected|disease|lesion|tumou?r|cancer",
+            characteristics_ch1, ignore.case = TRUE) ~ "disease",
+      TRUE ~ "other"
+    )
+  )
+
+group_counts_162183 <- groups_162183 %>%
+  count(group)
+
+group_counts_162183
+
+```
+**"GSE186458"**
+```{r}
+gse186458 <- sample_meta %>% 
+     filter(gse == "GSE186458")
+length(unique(gse186458$source_name_ch1))
+ unique_source_names <- unique(gse186458$source_name_ch1)
+
+gse186458 %>% 
+  count(source_name_ch1, name = "n")
+
+```
+
+
+
 

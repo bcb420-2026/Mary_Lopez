@@ -1,5 +1,6 @@
 ---
 title: "Assignment1"
+author: "Mary Lopez"
 output:
   html_document:
     toc: true

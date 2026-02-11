@@ -1,0 +1,373 @@
+---
+title: "Assignment1"
+output:
+  html_document:
+    toc: true
+    toc_depth: '3'
+    df_print: paged
+  html_notebook:
+    toc: true
+    toc_depth: '3'
+    toc_float: true
+    df_print: paged
+  pdf_document:
+    toc: true
+    toc_depth: '3'
+---
+
+
+
+## Introduction
+
+The focus of this assignment is the data set GSE296202 wwhich was generated as part of the study: "Synaptic effects of interleukin-6 on human iPSC-derived dopaminergic neurons", The full article can be accessed here: https://www.nature.com/articles/s41386-025-02320-y
+
+citation:
+Huang, Y., Michalski, C., Zhou, Y. et al. Synaptic effects of interleukin-6 on human iPSC-derived dopaminergic neurons. Neuropsychopharmacol. (2026). https://doi.org/10.1038/s41386-025-02320-y
+ 
+
+The study investigates how exposure to the inflammatory cytokine interleukin-6 (IL-6) in vitro alters the physiology of dopaminergic neurons generated from human iPSCs. The cells were derivred from healthy male and female volunteers, the aim is to test whether the inflamatory response will reduce dopamine (DA) availability and release, or disrupt DAergic neuronal function.
+
+The dataset was of interest to me as a neuroscience student because I wanted to focus on studies involving neurotransmitter-related genes. In earlier coursework I analyzed RNA-seq data generated from our lab’s cultured cells, where my assigned gene was DDC and I became interested in its downstream signalling. I particularly looked at datasets where I could study dopaminergic pathways more directly. DA neurons play essential roles in motor control, reinforcement learning, emotional regulation, and long-term behavioral shaping, so understanding their transcriptional behaviour can have very important results. Since this dataset examines transcriptional responses in human iPSC-derived dopaminergic neurons, it aligns directly with my interests in the molecular mechanisms underlying DA neuron function and neurotransmitter signalling.
+
+
+The dataset compares human iPSC-derived dopaminergic neurons under two conditions: untreated (vehicle) controls and cells exposed to the inflammatory cytokine IL-6. For both male and female donor lines, the study generated three biological samples in the control group and three in the IL-6 group. Each biological sample was sequenced in triplicate, producing three technical replicates per sample. In total, this yields twelve biological samples and thirty-six expression profiles when technical replicates are retained.
+Technical replicates belonged to the same biological sample. Because limma-voom is not designed to treat technical replicates as independent observations, I collapsed them when this was necessary by summing expression across replicates for some model. In the full 36-column dataset, I also evaluated designs that treated technical replicates explicitly, but collapsing was ultimately required for some analyses to maintain an appropriate model structure.
+
+Based on MDS visualization of the voom-transformed logCPM values, no samples showed extreme separation from their expected biological groups, and no clear outliers were detected in the dataset I analyzed.
+
+All gene identifiers in the raw count matrix were unique, i checked there were no duplicated Entrez IDs, and no symbols were duplicated after mapping Entrez IDs to HGNC gene symbols, therefore no two entries were mapped to the same gene and the collapsinng of rows was not required however I applied rowsum() as a standard step to safeguard against potential duplicates as rowsum() would collapse them if they existed and even if duplicates do not exist, it still gives the correct matrix unchanged and it did not alter the dataset because all mapped symbols were already unique. A total of 620 genes had no valid HGNC mapping and were removed. The final annotated dataset contained 27,775 uniquely mapped genes.
+
+The final expression matrix contained:
+27,775 uniquely mapped HGNC genes
+Across 12 biological samples
+This filtered dataset served as the basis for downstream differential expression, visualization, and summary statistics.
+ 
+
+
+we will begin with the necesary packages 
+
+```{r install_orgHs, include=FALSE}
+if (!requireNamespace("org.Hs.eg.db", quietly = TRUE)) {
+  if (!requireNamespace("BiocManager", quietly = TRUE)) {
+    install.packages("BiocManager", quiet = TRUE)
+  }
+
+  suppressWarnings(suppressMessages(
+    capture.output(
+      BiocManager::install("org.Hs.eg.db", ask = FALSE, quiet = TRUE),
+      file = "/dev/null"
+    )
+  ))
+}
+
+```
+
+
+```{r}
+
+suppressPackageStartupMessages({
+library(GEOquery)
+library(dplyr)
+
+library(org.Hs.eg.db)
+library(AnnotationDbi)
+
+library(edgeR)
+library(limma)
+  
+library(pheatmap)
+
+})
+
+```
+
+## Clean the data and map to hugo symbols
+
+here we are acessing the GSE296202
+
+```{r}
+
+#gse <- getGEO("GSE296202", GSEMatrix = TRUE)
+#i chose to supress messages to make the r noebook more clean
+suppressMessages({
+  gse <- getGEO("GSE296202", GSEMatrix = TRUE)
+})
+
+
+set<- gse[[1]]
+pheno    <- pData(set)
+
+if (!dir.exists("GSE296202") ||
+    !file.exists(file.path("GSE296202", "GSE296202_raw_counts_all_samples.csv.gz"))) {
+  getGEOSuppFiles("GSE296202", makeDirectory = TRUE)
+}
+
+counts_file <- file.path("GSE296202", "GSE296202_raw_counts_all_samples.csv.gz")
+
+raw <- read.csv(
+  counts_file,
+  header = TRUE,
+  stringsAsFactors = FALSE,
+  check.names = FALSE
+)
+
+gene_ids <- raw[[1]]
+entrez_ids <- as.character(raw[[1]])
+counts <- as.matrix(raw[, -(1:2)])
+rownames(counts) <- entrez_ids
+
+#here is some quick diagnostics on the data 
+#making sure the dta is in integers or this could cause problems for differential expressions
+typeof(counts)
+sum(is.na(gene_ids))
+any(counts < 0)
+sum(duplicated(gene_ids))
+
+```
+
+The raw data returns all counts as positive integers and there are no duplicated or missing gene ids. 
+now we will move on to mapping the identifiers to hugo symbols again checking for flaws in the data set.
+
+```{r}
+map_df <- AnnotationDbi::select(
+  org.Hs.eg.db,
+  keys     = entrez_ids,
+  keytype  = "ENTREZID",
+  columns  = c("SYMBOL")
+)
+
+
+symbol_vec <- map_df$SYMBOL[match(entrez_ids, map_df$ENTREZID)]
+
+
+keep <- !is.na(symbol_vec) & symbol_vec != ""
+counts_filt  <- counts[keep, ]
+symbols_filt <- symbol_vec[keep]
+
+counts_hgnc <- rowsum(counts_filt, group = symbols_filt)
+
+dim(counts_hgnc)
+head(rownames(counts_hgnc))
+head(counts_hgnc[, 1:3])
+
+
+
+cat("Missing symbols:", sum(is.na(symbol_vec) | symbol_vec == ""), "\n")
+cat("Duplicated symbols:", sum(duplicated(symbols_filt)), "\n")
+cat("Unique symbols:", length(unique(symbols_filt)), "\n")
+cat("Total mapped:", length(symbols_filt), "\n")
+
+```
+
+## Apply normalization
+
+I had great difficulty analyzing this data, here is a clean version of the normalization of the data which concluded with no differentially expressed genes and very little statistically significant data
+
+```{r}
+counts <- counts_hgnc   # 27775 x 36
+
+#Build pheno from the 36 sample names
+sample_names <- colnames(counts)
+
+pheno <- data.frame(
+  Sex       = factor(sub("^([FM]).*", "\\1", sample_names)),
+  Line      = factor(sub("^[FM]-(line[0-9]+)-.*", "\\1", sample_names)),
+  Treatment = factor(ifelse(grepl("IL6", sample_names), "IL6", "Veh"),
+                     levels = c("Veh", "IL6")),
+  Rep       = factor(sub(".*\\.(.)$", "\\1", sample_names)),
+  row.names = sample_names
+)
+
+stopifnot(identical(rownames(pheno), colnames(counts)))
+
+# Design matrix for all samples
+design_all <- model.matrix(~ Sex + Line + Treatment, data = pheno)
+#colnames(design_all) - checking for my peronal reference since i had problems with coefficient names 
+
+
+#differential expression analysis pipline
+library(edgeR)
+library(limma)
+
+y_all <- DGEList(counts = counts)
+
+keep_all <- rowSums(cpm(y_all) > 1) >= 4
+y_all <- y_all[keep_all, , keep.lib.sizes = FALSE]
+
+y_all <- calcNormFactors(y_all, method = "TMM")
+
+v_all <- voom(y_all, design_all, plot = TRUE)   
+
+fit_all <- lmFit(v_all, design_all)
+fit_all <- eBayes(fit_all)
+
+res_all <- topTable(
+  fit_all,
+  coef   = "TreatmentIL6",
+  number = Inf,
+  sort.by = "P"
+)
+
+# MDS plot for ALL samples
+logCPM_all <- cpm(y_all, log = TRUE, prior.count = 1)
+plotMDS(
+  logCPM_all,
+  labels = pheno$Treatment,
+  col    = as.integer(pheno$Sex)
+)
+legend("topright",
+       legend = levels(pheno$Sex),
+       col    = 1:2,
+       pch    = 16)
+
+#Significance counts
+sig_raw_all      <- res_all$P.Value < 0.05
+sig_fdr_all      <- res_all$adj.P.Val < 0.05
+sig_fdr_lfc1_all <- sig_fdr_all & abs(res_all$logFC) > 1
+
+
+cat("ALL SAMPLES:\n")
+cat("  Raw p < 0.05:", sum(sig_raw_all), "\n")
+cat("  FDR < 0.05:", sum(sig_fdr_all), "\n")
+cat("  FDR < 0.05 & |log2FC| > 1:", sum(sig_fdr_lfc1_all), "\n")
+
+```
+
+The data suggests that there are no genes greatly differentially expressed with treatment of IL6, the data shows more significant clustering between sex and line than treatment vs control. This suggests that sex and personal phenotype plays a more important role in gene expression of DA neurons
+
+In the article they noticed this and split the analysis by sex. The article notes the female lines had more significant gene expression change in response to interleukin signalling. Thus I conducted my study only on the female line as it yielded more significant results.
+
+## Differential Gene Expression
+```{r}
+
+# Subset to female
+idx_f <- pheno$Sex == "F"
+counts_f <- counts[, idx_f]
+pheno_f  <- droplevels(pheno[idx_f, ])
+
+# Design for females
+design_f <- model.matrix(~ Line + Treatment, data = pheno_f)
+#colnames(design_f)  - check
+
+
+# differential expression analysis 
+y_f <- DGEList(counts = counts_f)
+
+keep_f <- rowSums(cpm(y_f) > 1) >= 3   # relaxed for fewer samples
+y_f <- y_f[keep_f, , keep.lib.sizes = FALSE]
+
+y_f <- calcNormFactors(y_f, method = "TMM")
+
+v_f <- voom(y_f, design_f, plot = TRUE)    
+
+fit_f <- lmFit(v_f, design_f)
+fit_f <- eBayes(fit_f)
+
+res_f <- topTable(
+  fit_f,
+  coef   = "TreatmentIL6",
+  number = Inf,
+  sort.by = "P"
+)
+
+## 4. MDS plot for FEMALES only
+logCPM_f <- cpm(y_f, log = TRUE, prior.count = 1)
+plotMDS(
+  logCPM_f,
+  labels = pheno_f$Treatment,
+  col    = as.integer(pheno_f$Line)
+)
+legend("topright",
+       legend = levels(pheno_f$Line),
+       col    = 1:length(levels(pheno_f$Line)),
+       pch    = 16)
+
+## 5. Significance counts
+sig_raw_f      <- res_f$P.Value < 0.05
+sig_fdr_f      <- res_f$adj.P.Val < 0.05
+sig_fdr_lfc1_f <- sig_fdr_f & abs(res_f$logFC) > 1
+
+cat("FEMALES ONLY:\n")
+cat("  Raw p < 0.05:", sum(sig_raw_f), "\n")
+cat("  FDR < 0.05:", sum(sig_fdr_f), "\n")
+cat("  FDR < 0.05 & |log2FC| > 1:", sum(sig_fdr_lfc1_f), "\n")
+
+
+```
+
+```{r}
+
+plotMA(
+  fit_all,
+  coef = "TreatmentIL6",
+  main = "MA plot: IL6 vs Vehicle (All Samples)"
+)
+abline(h = c(-1, 1), col = "grey", lty = 2)  
+
+
+plotMA(
+  fit_f,
+  coef = "TreatmentIL6",
+  main = "MA plot: IL6 vs Vehicle (Females only)"
+)
+abline(h = c(-1, 1), col = "grey", lty = 2)
+
+
+
+```
+
+
+
+Here is differential analysis graphs for only females in the study.   
+volcano plot and heatmap
+
+```{r}
+
+with(res_f, plot(
+  logFC,
+  -log10(P.Value),
+  pch = 20,
+  main = "Volcano plot: IL6 vs Veh (Females only)",
+  xlab = "log2 fold-change",
+  ylab = "-log10(p-value)"
+))
+
+sig_idx <- res_f$adj.P.Val < 0.05 & abs(res_f$logFC) > 1
+points(res_f$logFC[sig_idx],
+       -log10(res_f$P.Value[sig_idx]),
+       pch = 20, col = "red")
+
+
+
+res_f$gene <- rownames(res_f)
+res_f_sorted <- res_f[order(res_f$adj.P.Val), ]
+
+
+top_n <- 50  # or 30
+top_genes <- res_f_sorted$gene[1:top_n]
+expr_f <- v_f$E[top_genes, ] 
+
+annotation_col <- data.frame(
+  Line      = pheno_f$Line,
+  Treatment = pheno_f$Treatment
+)
+
+rownames(annotation_col) <- rownames(pheno_f)
+
+
+pheatmap(
+  expr_f,
+  annotation_col = annotation_col,
+  scale          = "row",  # z-score 
+  clustering_distance_rows = "euclidean",
+  clustering_distance_cols = "euclidean",
+  clustering_method        = "complete",
+  main           = paste("Top", top_n, "DE genes (Females only, IL6 vs Veh)")
+)
+
+
+
+```
+
+
+

@@ -1,0 +1,26 @@
+# R session / IDE
+.Rhistory
+.RData
+.Rproj.user/
+
+# RMarkdown / LaTeX build artifacts
+*.log
+*.aux
+*.tex
+*.out
+*.toc
+
+# R notebook html
+*.nb.html
+
+# Bookdown artifacts
+_bookdown_files/
+**/_bookdown_files/
+
+# SQLite databases
+*.sqlite
+
+# GEO downloads / cached data
+GSE*/
+**/GSE*/
+

@@ -2,6 +2,17 @@
 
 These are intended to be done **after** completing the worked examples.
 
+
+
+```{r}
+suppressPackageStartupMessages({
+  library(readr)
+  library(biomaRt)
+  library(dplyr)
+})
+```
+
+
 ## Exercise 1 — https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE119732
 
 Using **GSE119732**, confirm whether the ID column contains Ensembl IDs with version suffixes.
@@ -10,6 +21,76 @@ Using **GSE119732**, confirm whether the ID column contains Ensembl IDs with ver
 2. Count how many contain a `.`.
 3. Create a new column with versions stripped.
 4. Map the identifiers to HGNC symbols.
+
+```{r}
+
+{r, message=FALSE, warning=FALSE}
+
+
+# helper function
+strip_ensembl_version <- function(x) sub("\\..*$", "", x)
+
+source("./fetch_geo_supp.R")
+
+params_119732 <- list(
+  gse       = "GSE119732",
+  file_grep = "count_table_RNA_seq"
+)
+
+fetch_geo_supp(gse = params_119732$gse)
+
+path_119732 <- file.path("data", params_119732$gse)
+files_119732 <- list.files(
+  path       = path_119732,
+  pattern    = params_119732$file_grep,
+  full.names = TRUE,
+  recursive  = TRUE
+)
+
+files_119732  # should show GSE119732_count_table_RNA_seq.txt.gz
+
+# read the count table
+x1 <- read_tsv(files_119732[1], show_col_types = FALSE)
+
+# the ID column is the first column
+id_col1 <- names(x1)[1]
+ids1    <- as.character(x1[[id_col1]])
+
+## 1. Extract the first 20 IDs.
+first20_1 <- ids1[1:20]
+first20_1
+
+## 2. Count how many contain a "."
+sum(grepl("\\.", first20_1))
+
+## 3. Create a new column with versions stripped.
+x1$ID_stripped <- strip_ensembl_version(ids1)
+
+head(x1[, c(id_col1, "ID_stripped")], 10)
+
+## 4. Map the identifiers to HGNC symbols.
+
+ensembl_ids1 <- unique(x1$ID_stripped)
+
+ensembl <- useMart("ensembl", dataset = "hsapiens_gene_ensembl")
+map1 <- getBM(
+  attributes = c("ensembl_gene_id", "hgnc_symbol"),
+  filters    = "ensembl_gene_id",
+  values     = ensembl_ids1,
+  mart       = ensembl
+)
+
+expr_mapped_1 <- x1 %>%
+  mutate(ensembl_gene_id = ID_stripped) %>%
+  left_join(
+    map1,
+    by = "ensembl_gene_id",
+    relationship = "many-to-many"  # acknowledge non 1:1 mapping
+  )
+
+head(expr_mapped_1[, 1:8])
+```
+
 
 ## Exercise 2 — https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE122380
 
@@ -20,6 +101,85 @@ Using **GSE122380**, confirm whether the ID column contains Ensembl IDs with ver
 3. Map the identifiers to HGNC symbols.
 4. What is different about this file? 
 
+
+```{r}
+
+params_122380 <- list(
+  gse       = "GSE122380",
+  file_grep = "raw_counts"
+)
+
+fetch_geo_supp(gse = params_122380$gse)
+
+path_122380 <- file.path("data", params_122380$gse)
+
+files_122380 <- list.files(
+  path       = path_122380,
+  pattern    = params_122380$file_grep,
+  full.names = TRUE,
+  recursive  = TRUE
+)
+
+files_122380  # should be "data/GSE122380/GSE122380_raw_counts.txt.gz"
+
+# read the raw counts
+
+x2 <- read_table(
+  files_122380[1],
+  comment = "#",    
+  col_types = cols()  
+)
+
+# test
+#dim(x2)
+#head(x2[, 1:5])
+#names(x2)
+
+## 1) Extract the first 20 IDs
+
+id_col2 <- names(x2)[1]      # gene ID column
+ids2    <- as.character(x2[[id_col2]])
+
+first20_2 <- ids2[1:20]
+first20_2
+
+## 2) Create a new column with versions stripped.
+
+x2$ID_stripped <- strip_ensembl_version(ids2)
+head(x2[, c(id_col2, "ID_stripped")], 10)
+
+## 3) Map the identifiers to HGNC symbols.
+
+ensembl_ids2 <- unique(x2$ID_stripped)
+
+ensembl <- useMart("ensembl", dataset = "hsapiens_gene_ensembl")
+map2 <- getBM(
+  attributes = c("ensembl_gene_id", "hgnc_symbol"),
+  filters    = "ensembl_gene_id",
+  values     = ensembl_ids2,
+  mart       = ensembl
+)
+
+str(map2$ensembl_gene_id)  
+
+expr_mapped_2 <- x2 %>%
+  mutate(ensembl_gene_id = ID_stripped) %>%
+  left_join(map2, by = "ensembl_gene_id")  
+
+head(expr_mapped_2[, 1:8])
+head(expr_mapped_2[, c("Gene_id", "ID_stripped", "hgnc_symbol")], 20)
+
+```
+4. what is different about this file is that the version numbers are already stripped so my stripped helper function does nothing, none of the ids contain a dot.
+For GSE122380, the raw counts file is whitespace delimited, so i had to change the way i read the table using read table instead of read tsv which is the first way i tried.
+
+
+
 ## Exercise 3 - 
  
 Can you use the worked example to process the above two GEO records?  How?
+
+i used the worked example to practice processing the geo records. i was inspired by the workflow and i used the same steps. i downloaded the supplementary data. i used read tsv for the first exercise, however i had to use read table for the second exercise as it was whitespace delimited. then i mapped the ensembl ids the same as the worked example. i took the first column of Ensembl IDs then i used biomart to map to HGNC symbols. for 6.1 i removed the version suffix like in the worked example however it was not necessary for 6.2.
+
+
+

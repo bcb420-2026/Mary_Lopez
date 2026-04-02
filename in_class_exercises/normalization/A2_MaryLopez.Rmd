@@ -1,0 +1,317 @@
+---
+title: "Assignment2"
+output: html_notebook
+---
+
+
+
+```{r}
+
+
+install.packages("msigdbr")
+BiocManager::install("fgsea")
+install.packages("gprofiler2")
+library(gprofiler2)
+
+library(dplyr)
+library(msigdbr)
+library(fgsea)
+library(gprofiler2)
+library(ggplot2)
+
+
+
+
+
+
+
+
+
+
+
+
+res_f_tbl <- as.data.frame(res_f)
+
+# Thresholded DE sets
+sig_female <- res_f_tbl %>%
+  filter(adj.P.Val < 0.05)
+
+sig_female_lfc1 <- res_f_tbl %>%
+  filter(adj.P.Val < 0.05, abs(logFC) > 1)
+
+up_genes <- res_f_tbl %>%
+  filter(adj.P.Val < 0.05, logFC > 0) %>%
+  pull(gene)
+
+down_genes <- res_f_tbl %>%
+  filter(adj.P.Val < 0.05, logFC < 0) %>%
+  pull(gene)
+
+up_genes_lfc1 <- res_f_tbl %>%
+  filter(adj.P.Val < 0.05, logFC > 1) %>%
+  pull(gene)
+
+down_genes_lfc1 <- res_f_tbl %>%
+  filter(adj.P.Val < 0.05, logFC < -1) %>%
+  pull(gene)
+
+cat("Female-only thresholded gene sets\n")
+cat("Up-regulated, FDR < 0.05:", length(up_genes), "\n")
+cat("Down-regulated, FDR < 0.05:", length(down_genes), "\n")
+cat("Up-regulated, FDR < 0.05 & log2FC > 1:", length(up_genes_lfc1), "\n")
+cat("Down-regulated, FDR < 0.05 & log2FC < -1:", length(down_genes_lfc1), "\n")
+```
+
+```{r}
+# significant genes
+sig_genes <- res_f_tbl %>%
+  filter(adj.P.Val < 0.05)
+
+# up-regulated
+up_genes <- res_f_tbl %>%
+  filter(adj.P.Val < 0.05, logFC > 0) %>%
+  pull(gene)
+
+# down-regulated
+down_genes <- res_f_tbl %>%
+  filter(adj.P.Val < 0.05, logFC < 0) %>%
+  pull(gene)
+
+cat("Significant genes:", nrow(sig_genes), "\n")
+cat("Up genes:", length(up_genes), "\n")
+cat("Down genes:", length(down_genes), "\n")
+
+
+
+
+gene_ranks <- res_f_tbl$t
+names(gene_ranks) <- res_f_tbl$gene
+gene_ranks <- sort(gene_ranks, decreasing = TRUE)
+
+
+
+head(gene_ranks)
+
+
+
+msig_h <- msigdbr(
+  species = "Homo sapiens",
+  category = "H"
+)
+
+pathways <- split(msig_h$gene_symbol, msig_h$gs_name)
+
+
+fgsea_res <- fgsea(
+  pathways = pathways,
+  stats = gene_ranks,
+  minSize = 15,
+  maxSize = 500
+)
+
+fgsea_res <- fgsea_res[order(fgsea_res$padj), ]
+
+head(fgsea_res)
+
+
+
+gost_up <- gost(
+  query = up_genes,
+  organism = "hsapiens",
+  correction_method = "fdr",
+  sources = c("GO:BP")
+)
+
+gost_down <- gost(
+  query = down_genes,
+  organism = "hsapiens",
+  correction_method = "fdr",
+  sources = c("GO:BP")
+)
+
+ora_up_tbl <- gost_up$result
+ora_down_tbl <- gost_down$result
+
+head(ora_up_tbl)
+head(ora_down_tbl)
+
+sum(ora_up_tbl$p_value < 0.05)
+sum(ora_down_tbl$p_value < 0.05)
+colnames(ora_up_tbl)
+
+ora_up_top <- ora_up_tbl[order(ora_up_tbl$p_value), c("term_name", "p_value", "intersection_size", "term_size")]
+ora_down_top <- ora_down_tbl[order(ora_down_tbl$p_value), c("term_name", "p_value", "intersection_size", "term_size")]
+
+head(ora_up_top, 10)
+head(ora_down_top, 10)
+
+library(ggplot2)
+
+ora_up_plot <- head(ora_up_top, 10)
+ora_up_plot$term_name <- factor(ora_up_plot$term_name, levels = rev(ora_up_plot$term_name))
+
+ggplot(ora_up_plot, aes(x = term_name, y = -log10(p_value))) +
+  geom_col() +
+  coord_flip() +
+  labs(
+    title = "Top enriched GO Biological Process terms: up-regulated genes",
+    x = "GO term",
+    y = expression(-log[10](FDR))
+  )
+
+ora_down_plot <- head(ora_down_top, 10)
+ora_down_plot$term_name <- factor(ora_down_plot$term_name, levels = rev(ora_down_plot$term_name))
+
+ggplot(ora_down_plot, aes(x = term_name, y = -log10(p_value))) +
+  geom_col() +
+  coord_flip() +
+  labs(
+    title = "Top enriched GO Biological Process terms: down-regulated genes",
+    x = "GO term",
+    y = expression(-log[10](FDR))
+  )
+
+
+dir.create("figures", showWarnings = FALSE)
+
+ggsave("figures/ora_up_go_bp.png", width = 9, height = 6)
+ggsave("figures/ora_down_go_bp.png", width = 9, height = 6)
+
+
+fgsea_sig <- fgsea_res[fgsea_res$padj < 0.05, ]
+head(fgsea_sig, 15)
+
+
+fgsea_pos <- fgsea_sig[fgsea_sig$NES > 0, ]
+fgsea_neg <- fgsea_sig[fgsea_sig$NES < 0, ]
+
+head(fgsea_pos[, c("pathway", "NES", "pval", "padj", "size")], 10)
+head(fgsea_neg[, c("pathway", "NES", "pval", "padj", "size")], 10)
+
+cat("Significant GSEA pathways (FDR < 0.05):", nrow(fgsea_sig), "\n")
+cat("Positive NES:", nrow(fgsea_pos), "\n")
+cat("Negative NES:", nrow(fgsea_neg), "\n")
+
+fgsea_top <- rbind(
+  head(fgsea_pos[order(-fgsea_pos$NES), c("pathway", "NES", "padj")], 10),
+  head(fgsea_neg[order(fgsea_neg$NES), c("pathway", "NES", "padj")], 10)
+)
+
+fgsea_top$pathway <- factor(fgsea_top$pathway, levels = fgsea_top$pathway[order(fgsea_top$NES)])
+
+ggplot(fgsea_top, aes(x = pathway, y = NES)) +
+  geom_col() +
+  coord_flip() +
+  labs(
+    title = "Top enriched Hallmark pathways from GSEA",
+    x = "Pathway",
+    y = "Normalized enrichment score (NES)"
+  )
+
+ggsave("figures/gsea_hallmark_top_pathways.png", width = 9, height = 7)
+
+top_pos_pathway <- fgsea_pos$pathway[which.max(fgsea_pos$NES)]
+top_neg_pathway <- fgsea_neg$pathway[which.min(fgsea_neg$NES)]
+
+top_pos_pathway
+top_neg_pathway
+
+plotEnrichment(pathways[[top_pos_pathway]], gene_ranks) +
+  labs(title = top_pos_pathway)
+
+plotEnrichment(pathways[[top_neg_pathway]], gene_ranks) +
+  labs(title = top_neg_pathway)
+
+ggsave("figures/gsea_top_positive_enrichment.png", width = 8, height = 5)
+ggsave("figures/gsea_top_negative_enrichment.png", width = 8, height = 5)
+
+rank_tbl <- data.frame(
+  gene = names(gene_ranks),
+  rank = as.numeric(gene_ranks)
+)
+
+write.table(
+  rank_tbl,
+  file = "ranked_gene_list.rnk",
+  sep = "\t",
+  quote = FALSE,
+  row.names = FALSE,
+  col.names = FALSE
+)
+
+fgsea_export <- fgsea_res[, !names(fgsea_res) %in% "leadingEdge"]
+
+write.table(
+  fgsea_export,
+  file = "fgsea_hallmark_results.tsv",
+  sep = "\t",
+  quote = FALSE,
+  row.names = FALSE
+)
+
+pathway_list <- split(msig_h$gene_symbol, msig_h$gs_name)
+
+gmt_lines <- vapply(names(pathway_list), function(pw) {
+  paste(c(pw, pw, unique(pathway_list[[pw]])), collapse = "\t")
+}, character(1))
+
+writeLines(gmt_lines, "hallmark_hsapiens.gmt")
+
+file.exists("hallmark_hsapiens.gmt")
+file.exists("ranked_gene_list.rnk")
+file.exists("fgsea_hallmark_results.tsv")
+
+
+fgsea_pos <- fgsea_res[fgsea_res$NES > 0 & fgsea_res$padj < 0.05, ]
+fgsea_neg <- fgsea_res[fgsea_res$NES < 0 & fgsea_res$padj < 0.05, ]
+
+fgsea_pos$leadingEdge <- NULL
+fgsea_neg$leadingEdge <- NULL
+
+write.table(
+  fgsea_pos,
+  "fgsea_positive.tsv",
+  sep="\t",
+  quote=FALSE,
+  row.names=FALSE
+)
+
+write.table(
+  fgsea_neg,
+  "fgsea_negative.tsv",
+  sep="\t",
+  quote=FALSE,
+  row.names=FALSE
+)
+
+fgsea_gem <- data.frame(
+  name = fgsea_res$pathway,                         
+  description = fgsea_res$pathway,                  
+  pvalue = fgsea_res$pval,
+  qvalue = fgsea_res$padj,
+  phenotype = ifelse(fgsea_res$NES >= 0, 1, -1),   
+  genes = vapply(fgsea_res$leadingEdge, paste, collapse = ",", character(1)),
+  stringsAsFactors = FALSE
+)
+
+fgsea_gem_sig <- subset(fgsea_gem, qvalue < 0.05)
+
+write.table(
+  fgsea_gem_sig,
+  file = "fgsea_hallmark_generic_em.tsv",
+  sep = "\t",
+  quote = FALSE,
+  row.names = FALSE
+)
+
+head(fgsea_gem_sig)
+colnames(fgsea_gem_sig)
+
+
+
+```
+
+
+
+the findings are consistent with what the the article shows. the data set is too small to find any significant data for the 
+

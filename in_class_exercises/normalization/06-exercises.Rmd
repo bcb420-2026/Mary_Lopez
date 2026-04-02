@@ -6,19 +6,293 @@ These are intended to be done **after** completing the worked examples.
 Using **GSE119732**, 
 
   1. Map the distribution of the samples as a box plot and a density plot using only the raw data.
-  2.  Add colours to the plot separating the different variables in the model
-  3.  Filter out lowly expressed genes and re plot the distributions.
 
 
+```{r ex1_get_data}
+gse1 <- "GSE119732"
+fetch_geo_supp(gse = gse1)
+
+path1  <- file.path("data", gse1)
+files1 <- list.files(
+  path1,
+  pattern = "\\.txt$|\\.txt.gz$|\\.tsv$|\\.tsv.gz$|\\.csv$|\\.csv.gz$",
+  full.names = TRUE,
+  recursive = TRUE
+)
+
+files1 #checking the file
+
+x1 <- safe_read(files1[1])
+
+head(x1)[, 1:min(6, ncol(x1))]
+
+counts1 <- as.matrix(x1[, 2:ncol(x1)])
+plot_box(counts1, main = paste(gse1, "- raw counts"))
+plot_density(counts1, main = paste(gse1, "- raw counts"))
+```
+2.  Add colours to the plot separating the different variables in the model
+  
+```{r ex1_design} 
+samples1 <- colnames(x1)[-1]
+
+# parsing
+
+patient  <- factor(substr(samples1, 1, 1))
+subset   <- factor(substr(samples1, 2, 2), levels = c("1","2","3","4","5"))
+sample_data1 <- data.frame(
+  sample   = samples1,
+  patient  = patient,
+  subset   = subset
+)
+
+#sample_data1 #checking hoe i parsed it 
+
+#design matrix
+design1 <- model.matrix(~ patient + subset, data = sample_data1)
+rownames(design1) <- sample_data1$sample
+
+design1[1:10, ]
+
+```
+
+```{r ex1_boxplot} 
+# Boxplot must be ran all at once
+
+counts1 <- as.matrix(x1[, -1])
+
+group_patient <- sample_data1$patient
+
+
+boxplot(
+  log2(counts1 + 1),
+  col = as.integer(group_patient),
+  las = 2,
+  main = "GSE119732 raw counts by patient",
+  ylab = "log2(count + 1)"
+)
+
+legend(
+  "topright",
+  legend = levels(group_patient),
+  col    = seq_along(levels(group_patient)),
+  pch    = 15,
+  bty    = "n",
+  title  = "patient"
+)
+
+
+```
+
+
+
+```{r ex1_densityplot} 
+
+# Density plot must be ran all at once
+
+counts1 <- as.matrix(x1[, -1])
+
+group_patient <- sample_data1$patient
+
+plot(NULL,
+     xlim = c(0,20),
+     ylim = c(0,0.4),
+     xlab = "log2(count + 1)",
+     ylab = "Density",
+     main = "GSE119732 density by patient")
+
+for (i in seq_len(ncol(counts1))) {
+  lines(
+    density(log2(counts1[, i] + 1)),
+    col = as.integer(group_patient)[i]
+  )
+}
+
+legend("topright",
+       legend = levels(group_patient),
+       col = seq_along(levels(group_patient)),
+       lty = 1,
+       bty = "n",
+       title = "patient")
+
+
+```
+  
+3.  Filter out lowly expressed genes and re plot the distributions.
+
+```{r ex1_filterandreplot}
+dge1 <- DGEList(counts = counts1)
+
+design1 <- model.matrix(~ patient + subset, data = sample_data1)
+
+rownames(design1) <- sample_data1$sample
+
+
+keep1 <- filterByExpr(dge1, design = design1)
+dge1_filtered <- dge1[keep1, , keep.lib.sizes = FALSE]
+
+cpm1_filtered <- cpm(dge1_filtered, log = FALSE)
+
+plot_box(cpm1_filtered,
+         main = paste(gse1, "- CPM after filtering (with design)"))
+plot_density(cpm1_filtered,
+             main = paste(gse1, "- CPM after filtering (with design)"))
+
+```
 
 ## Exercise 2 — https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE122380
 
 Using **GSE122380**, confirm whether the ID column contains Ensembl IDs with version suffixes.
 
+```{r ex2_get_data}
+gse2 <- "GSE122380"
+fetch_geo_supp(gse = gse2)
+
+path2  <- file.path("data", gse2)
+files2 <- list.files(
+  path2,
+  pattern = "\\.txt$|\\.txt.gz$|\\.tsv$|\\.tsv.gz$|\\.csv$|\\.csv.gz$",
+  full.names = TRUE,
+  recursive = TRUE
+)
+
+files2 #all good
+
+x2 <- safe_read(files2[1])
+
+head(x2)[, 1:min(6, ncol(x2))]
+
+id_col_name <- colnames(x2)[1]
+
+head_ids <- head(x2[[id_col_name]])
+head_ids
+all(grepl("^ENSG[0-9]+\\.[0-9]+$", head_ids))
+
+```
+as you can see there are no ensembl IDs with version suffixes
+
  1. Map the distribution of the samples as a box plot and a density plot using only the raw data.
+ 
+```{r ex2_plotting}
+ counts2 <- as.matrix(x2[, -1])
+ plot_box(counts2, main = paste(gse2, "- raw counts"))
+plot_density(counts2, main = paste(gse2, "- raw counts"))
+ 
+```
+ 
+ 
+ 
+ 
   2.  Add colours to the plot separating the different variables in the model
-  3.  Filter out lowly expressed genes and re plot the distributions.
+  
+```{r ex2_workingwiththedata} 
+  
+samples2 <- colnames(counts2)
+
+parts2 <- strsplit(samples2, "_")
+
+individual2 <- sapply(parts2, `[`, 1)
+time2 <- sapply(parts2, `[`, 2)
+
+sample_data2 <- data.frame(
+  sample = samples2,
+  individual = factor(individual2),
+  time = factor(time2)
+)
+
+#sample_data2 #all clear 
+
+design2 <- model.matrix(~ individual + time, data = sample_data2)
+rownames(design2) <- sample_data2$sample
+
+```
+
+
+```{r ex2_boxplot} 
+group_individual <- sample_data2$individual
+
+boxplot(
+  log2(counts2 + 1),
+  col = as.integer(group_individual),
+  las = 2,
+  main = "Raw counts coloured by individual",
+  ylab = "log2(count + 1)"
+)
+
+legend(
+  "topright",
+  legend = levels(group_individual),
+  col = seq_along(levels(group_individual)),
+  pch = 15,
+  bty = "n",
+  title = "individual"
+)
+
+```
+
+```{r ex2_desityplot} 
+plot(NULL,
+     xlim = c(0,20),
+     ylim = c(0,0.4),
+     xlab = "log2(count + 1)",
+     ylab = "Density",
+     main = "Density coloured by individual")
+
+for (i in seq_len(ncol(counts2))) {
+  lines(
+    density(log2(counts2[, i] + 1)),
+    col = as.integer(group_individual)[i]
+  )
+}
+
+legend("topright",
+       legend = levels(group_individual),
+       col = seq_along(levels(group_individual)),
+       lty = 1,
+       bty = "n",
+       title = "individual")
+
+
+
+```
+  
+  
+  
+3.  Filter out lowly expressed genes and re plot the distributions.
+
+
+```{r}
+dge2 <- DGEList(counts = counts2)
+
+keep2 <- filterByExpr(dge2, design = design2)
+
+dge2_filtered <- dge2[keep2, , keep.lib.sizes = FALSE]
+
+cpm2_filtered <- cpm(dge2_filtered)
+
+plot_box(cpm2_filtered)
+plot_density(cpm2_filtered)
+
+```
+
+
+
+
+
+
 
 ## Exercise 3 - 
  
 Can you use the worked example to process the above two GEO records?  How?
+
+i was following the basic premise of the worked example however for the first exercize which is based on https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE119732 . the design for this data set is 4-5 different CD4 T cell populations from 6 donors. after adjusting to the apppropriate parameters for the design i follwed the standard protocol for making boxplots, density plots, and filtering out lowly expressed genes.
+ for example 2 the sample names encode two variables, the design was based on individual and time point. i separated these using strsplit() then coloured the boxplots and density plots using these variables to visualize differences between individuals and time points.
+ 
+
+
+
+
+
+
+
+
+
